@@ -75,7 +75,7 @@ backup_*/
 backups/
 **/data/backups/
 data/backups/
-**/backups/
+backend/data/backups/
 
 # Excel temporary / lock files
 ~$*.xlsx
@@ -113,3 +113,6 @@ Icon
 *.swp
 *.swo
 *~
+products-backup.bundle
+tracked-files.txt
+*.contact_bak
