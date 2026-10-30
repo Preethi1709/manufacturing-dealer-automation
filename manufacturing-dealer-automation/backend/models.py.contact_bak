@@ -1,0 +1,363 @@
+from typing import Optional, List
+from pydantic import BaseModel, Field
+
+# ----------------- Requirement Models -----------------
+class RequirementBase(BaseModel):
+    product_name: str = Field(..., min_length=2, description="Name of the required manufacturing item/part")
+    category: Optional[str] = Field("Industrial Components", description="Product category (e.g. Raw Materials, Fasteners, Machined Parts)")
+    specifications: Optional[str] = Field("", description="Detailed technical specifications, tolerances, dimensions")
+    material: Optional[str] = Field(None, description="Material grade or composition (e.g. SS316, 6061-T6, POM)")
+    size: Optional[str] = Field(None, description="Dimensions or size parameters")
+    grade: Optional[str] = Field(None, description="Quality or manufacturing grade")
+    model: Optional[str] = Field(None, description="Model number or standard (e.g. DIN 912, ISO 4017)")
+    quantity: Optional[float] = Field(1.0, gt=0, description="Required quantity")
+    target_price: Optional[float] = Field(0.0, ge=0, description="Target or budget unit price")
+    currency: Optional[str] = Field("USD", description="Currency code (USD, EUR, INR, GBP, etc.)")
+    preferred_location: Optional[str] = Field(None, description="Preferred supplier geographic region")
+    delivery_requirement: Optional[str] = Field(None, description="Target lead time (e.g. '14 days', '4 weeks')")
+    additional_requirements: Optional[str] = Field(None, description="Packaging, certification (ISO 9001), testing, etc.")
+
+class RequirementCreate(RequirementBase):
+    pass
+
+class RequirementUpdate(BaseModel):
+    product_name: Optional[str] = None
+    category: Optional[str] = None
+    specifications: Optional[str] = None
+    material: Optional[str] = None
+    size: Optional[str] = None
+    grade: Optional[str] = None
+    model: Optional[str] = None
+    quantity: Optional[float] = None
+    target_price: Optional[float] = None
+    currency: Optional[str] = None
+    preferred_location: Optional[str] = None
+    delivery_requirement: Optional[str] = None
+    additional_requirements: Optional[str] = None
+
+class RequirementResponse(RequirementBase):
+    requirement_id: str
+    created_at: str
+
+
+# ----------------- Dealer / Supplier Models -----------------
+class DealerBase(BaseModel):
+    requirement_id: str = Field(..., description="Referenced requirement ID")
+    dealer_name: str = Field(..., min_length=2, description="Dealer or supplier company name")
+    product_name: str = Field(..., description="Supplier's catalog or quoted product name")
+    specifications: str = Field(..., description="Supplier's technical specifications")
+    public_contact_number: Optional[str] = Field(None, description="Official public business telephone")
+    business_email: Optional[str] = Field(None, description="Verified business contact email")
+    location: str = Field(..., description="City, State, Country or Region")
+    source_portal: str = Field("Manual Entry", description="Sourcing portal or discovery method")
+    product_url: Optional[str] = Field(None, description="Direct catalog, listing, or official company URL")
+    listed_price: Optional[float] = Field(None, ge=0, description="Catalog or preliminary listed unit price")
+    confirmed_quoted_price: Optional[float] = Field(None, ge=0, description="Formal RFQ quoted unit price")
+    currency: str = Field("USD", description="Currency code")
+    moq: Optional[float] = Field(None, ge=0, description="Minimum Order Quantity")
+    taxes: Optional[float] = Field(None, ge=0, description="Taxes or VAT per unit or %")
+    delivery_charges: Optional[float] = Field(None, ge=0, description="Freight or shipping charge")
+    delivery_time: Optional[str] = Field(None, description="Quoted lead time (e.g. '10 days', '3 weeks')")
+    match_status: Optional[str] = Field("Needs Verification", description="Exact Match, Partial Match, Not a Match, Needs Verification")
+    match_reason: Optional[str] = Field(None, description="Detailed explanation for match score")
+    verification_status: Optional[str] = Field("Pending Verification", description="Verified, Pending Verification, Unverified, Rejected")
+
+class DealerCreate(DealerBase):
+    pass
+
+class DealerUpdate(BaseModel):
+    dealer_name: Optional[str] = None
+    product_name: Optional[str] = None
+    specifications: Optional[str] = None
+    public_contact_number: Optional[str] = None
+    business_email: Optional[str] = None
+    location: Optional[str] = None
+    source_portal: Optional[str] = None
+    product_url: Optional[str] = None
+    listed_price: Optional[float] = None
+    confirmed_quoted_price: Optional[float] = None
+    currency: Optional[str] = None
+    moq: Optional[float] = None
+    taxes: Optional[float] = None
+    delivery_charges: Optional[float] = None
+    delivery_time: Optional[str] = None
+    match_status: Optional[str] = None
+    match_reason: Optional[str] = None
+    verification_status: Optional[str] = None
+
+class DealerResponse(DealerBase):
+    dealer_id: str
+    created_at: str
+
+
+# ----------------- Contact Log Models -----------------
+class ContactBase(BaseModel):
+    dealer_id: str = Field(..., description="Associated dealer ID")
+    requirement_id: str = Field(..., description="Associated requirement ID")
+    contact_method: str = Field("Email", description="Email, Phone, Portal Inquiry, RFQ Form, WhatsApp")
+    inquiry_message: str = Field(..., description="Message text or RFQ transmission")
+    contact_date: str = Field(..., description="Date of outreach (YYYY-MM-DD)")
+    response_status: str = Field("Pending", description="Pending, Responded, Declined, Follow-up Required, Sent/Accepted, Failed, Reply Received, Quotation Received, Closed")
+    dealer_response: Optional[str] = Field(None, description="Summary of dealer reply")
+    follow_up_date: Optional[str] = Field(None, description="Scheduled follow-up date")
+    quotation_file_path: Optional[str] = Field(None, description="Relative path or filename of uploaded quote document")
+    notes: Optional[str] = Field(None, description="Internal procurement notes")
+    # Extended fields for full lifecycle tracking
+    supplier_name: Optional[str] = Field(None, description="Supplier / dealer name")
+    product_name: Optional[str] = Field(None, description="Part or product requirement name")
+    recipient_contact: Optional[str] = Field(None, description="Target email address or phone number")
+    subject: Optional[str] = Field(None, description="Inquiry or RFQ subject line")
+    created_at: Optional[str] = Field(None, description="ISO timestamp of record creation")
+    updated_at: Optional[str] = Field(None, description="ISO timestamp of last update")
+    approval_timestamp: Optional[str] = Field(None, description="ISO timestamp when user approved contact")
+    send_attempt_timestamp: Optional[str] = Field(None, description="ISO timestamp when send was attempted")
+    provider_message_id: Optional[str] = Field(None, description="Unique message ID returned by email/WhatsApp provider")
+    communication_status: Optional[str] = Field(None, description="Draft, Awaiting Approval, Sent/Accepted, Failed, Reply Received, Quotation Received, Closed")
+    response_date: Optional[str] = Field(None, description="Date supplier replied")
+    quoted_price: Optional[float] = Field(None, description="Quoted unit price from supplier")
+    currency: Optional[str] = Field("USD", description="Currency of quoted price")
+    moq: Optional[float] = Field(None, description="Minimum order quantity quoted")
+    delivery_time: Optional[str] = Field(None, description="Quoted lead time / delivery schedule")
+    quotation_validity: Optional[str] = Field(None, description="Quotation validity period")
+    technical_details: Optional[str] = Field(None, description="Technical specifications or compliance notes from supplier")
+    follow_up_status: Optional[str] = Field(None, description="Status of follow-up action")
+    error_details: Optional[str] = Field(None, description="Sanitized error details if delivery failed")
+
+class ContactCreate(ContactBase):
+    pass
+
+class ContactUpdate(BaseModel):
+    contact_method: Optional[str] = None
+    inquiry_message: Optional[str] = None
+    contact_date: Optional[str] = None
+    response_status: Optional[str] = None
+    dealer_response: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    quotation_file_path: Optional[str] = None
+    notes: Optional[str] = None
+    supplier_name: Optional[str] = None
+    product_name: Optional[str] = None
+    recipient_contact: Optional[str] = None
+    subject: Optional[str] = None
+    approval_timestamp: Optional[str] = None
+    send_attempt_timestamp: Optional[str] = None
+    provider_message_id: Optional[str] = None
+    communication_status: Optional[str] = None
+    response_date: Optional[str] = None
+    quoted_price: Optional[float] = None
+    currency: Optional[str] = None
+    moq: Optional[float] = None
+    delivery_time: Optional[str] = None
+    quotation_validity: Optional[str] = None
+    technical_details: Optional[str] = None
+    follow_up_status: Optional[str] = None
+    error_details: Optional[str] = None
+
+class ContactResponse(ContactBase):
+    contact_id: str
+    dealer_name: Optional[str] = None
+    product_name: Optional[str] = None
+
+class EmailSendRequest(BaseModel):
+    requirement_id: str
+    dealer_id: str
+    supplier_name: Optional[str] = None
+    product_name: Optional[str] = None
+    recipient_email: str
+    subject: str
+    message_body: str
+    sender_name: Optional[str] = "Industrial Procurement Team"
+    approved: bool = Field(False, description="Explicit user confirmation to send")
+
+class WhatsAppSendRequest(BaseModel):
+    requirement_id: str
+    dealer_id: str
+    supplier_name: Optional[str] = None
+    product_name: Optional[str] = None
+    recipient_phone: str
+    message_body: str
+    approved: bool = Field(False, description="Explicit user confirmation to initiate contact")
+
+class RecordReplyRequest(BaseModel):
+    supplier_response: str
+    response_date: Optional[str] = None
+    quoted_price: Optional[float] = None
+    currency: Optional[str] = "USD"
+    moq: Optional[float] = None
+    delivery_time: Optional[str] = None
+    quotation_validity: Optional[str] = None
+    technical_details: Optional[str] = None
+    quotation_file_path: Optional[str] = None
+    next_follow_up_date: Optional[str] = None
+    communication_status: Optional[str] = None
+    notes: Optional[str] = None
+
+class ExtractReplyRequest(BaseModel):
+    reply_text: str
+
+class FollowUpMetricsResponse(BaseModel):
+    due_today: int
+    overdue: int
+    waiting_response: int
+    reply_received: int
+    quotation_received: int
+    failed_attempts: int
+    closed: int
+    total: int
+
+
+# ----------------- Quotation Comparison Models -----------------
+class QuotationComparisonItem(BaseModel):
+    comparison_id: str
+    requirement_id: str
+    dealer_id: str
+    dealer_name: str
+    unit_price: Optional[float] = None
+    quantity: float
+    taxes: Optional[float] = None
+    delivery_charges: Optional[float] = None
+    estimated_total_cost: Optional[float] = None
+    has_unconfirmed_costs: bool = False
+    currency: str = "USD"
+    moq: Optional[float] = None
+    delivery_time: Optional[str] = None
+    match_status: str = "Pending"
+    verification_status: str = "Pending Verification"
+    comparison_notes: Optional[str] = None
+    recommendation_score: Optional[float] = None
+
+class QuotationCompareRequest(BaseModel):
+    requirement_id: str
+    dealer_ids: Optional[List[str]] = None
+
+class QuotationCompareResponse(BaseModel):
+    requirement: RequirementResponse
+    comparisons: List[QuotationComparisonItem]
+    recommended_dealer_id: Optional[str] = None
+    recommendation_summary: Optional[str] = None
+
+
+# ----------------- Search & Portal Models -----------------
+class SearchRequest(BaseModel):
+    requirement_id: Optional[str] = None
+    product_name: Optional[str] = None
+    category: Optional[str] = None
+    specifications: Optional[str] = None
+    portal: str = Field("local_directory", description="local_directory, live_web, tavily, thomasnet, indiamart, alibaba, manual")
+    filter_location: Optional[str] = None
+    max_results: int = Field(10, ge=1, le=50)
+
+class ImageIdentifyResponse(BaseModel):
+    product_name: Optional[str] = ""
+    category: Optional[str] = "Industrial Components"
+    product_type: Optional[str] = None
+    brand: Optional[str] = None
+    model_number: Optional[str] = None
+    readable_text: Optional[str] = None
+    physical_features: Optional[str] = None
+    specifications: Optional[str] = ""
+    confidence: float
+    details: Optional[str] = None
+    requires_user_input: bool = False
+    ai_provider: Optional[str] = "Vision AI"
+    message: Optional[str] = None
+
+class SearchResultItem(BaseModel):
+    dealer_name: str
+    product_name: str
+    specifications: str
+    public_contact_number: Optional[str] = None
+    business_email: Optional[str] = None
+    location: str
+    source_portal: str
+    product_url: Optional[str] = None
+    listed_price: Optional[float] = None
+    moq: Optional[float] = None
+    delivery_time: Optional[str] = None
+    match_status: str
+    match_reason: str
+    verification_status: str
+    image_url: Optional[str] = None
+    model_number: Optional[str] = None
+    matching_specs: Optional[List[str]] = None
+    missing_specs: Optional[List[str]] = None
+    match_evidence: Optional[str] = None
+
+class SearchResponse(BaseModel):
+    search_id: str
+    requirement_id: str
+    portal: str
+    search_date: str
+    status: str  # "COMPLETED", "PARTIAL", "CONFIG_REQUIRED", "ERROR"
+    results_count: int
+    results: List[SearchResultItem]
+    error_message: Optional[str] = None
+    notes: Optional[str] = None
+
+class SearchHistoryItem(BaseModel):
+    search_id: str
+    requirement_id: str
+    search_portal: str
+    search_date: str
+    search_status: str
+    results_count: int
+    error_message: Optional[str] = None
+
+
+# ----------------- Dashboard Models -----------------
+class RecentSearchActivity(BaseModel):
+    search_id: str
+    product_name: str
+    portal: str
+    date: str
+    results_count: int
+    status: str
+
+class RecentDealerActivity(BaseModel):
+    dealer_id: str
+    dealer_name: str
+    product_name: str
+    match_status: str
+    verification_status: str
+    created_at: str
+
+class DashboardMetricsResponse(BaseModel):
+    total_products_submitted: int
+    total_dealers_discovered: int
+    exact_matches: int
+    partial_matches: int
+    not_matches: int
+    quotations_received: int
+    pending_dealer_responses: int
+    verified_dealers: int
+    recent_searches: List[RecentSearchActivity]
+    recent_dealer_activities: List[RecentDealerActivity]
+
+
+# ----------------- Inquiry Generator Models -----------------
+class InquiryGenerateRequest(BaseModel):
+    requirement_id: Optional[str] = "REQ-INQUIRY"
+    dealer_id: Optional[str] = "TEMP-DLR"
+    supplier_name: Optional[str] = None
+    dealer_name: Optional[str] = None
+    product_name: Optional[str] = None
+    category: Optional[str] = None
+    specifications: Optional[str] = None
+    quantity: Optional[float] = None
+    target_price: Optional[float] = None
+    currency: Optional[str] = "USD"
+    delivery_requirement: Optional[str] = None
+    business_email: Optional[str] = None
+    public_contact_number: Optional[str] = None
+    product_url: Optional[str] = None
+    sender_name: Optional[str] = "Procurement Department"
+    sender_company: Optional[str] = "Apex Manufacturing Corp."
+    custom_notes: Optional[str] = None
+
+class InquiryGenerateResponse(BaseModel):
+    subject: str
+    message: str
+    dealer_name: str
+    business_email: Optional[str] = None
+    public_contact_number: Optional[str] = None
+    contact_method: str = "Email"

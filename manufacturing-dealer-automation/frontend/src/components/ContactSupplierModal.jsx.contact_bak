@@ -1,0 +1,617 @@
+import React, { useState, useEffect } from 'react';
+import {
+  X,
+  Mail,
+  Phone,
+  Globe,
+  ExternalLink,
+  Send,
+  Copy,
+  Check,
+  AlertTriangle,
+  CheckCircle,
+  AlertCircle,
+  Clock,
+  ShieldAlert,
+  MessageSquare
+} from 'lucide-react';
+import { apiService } from '../services/api';
+import StatusBadge from './StatusBadge';
+
+export default function ContactSupplierModal({ requirement, supplier, onClose, onLogged }) {
+  // Navigation / Channel Selection: 'email' | 'whatsapp' | 'portal'
+  const [activeChannel, setActiveChannel] = useState('email');
+
+  // Supplier contact fields (editable with fallback to "Not available")
+  const rawEmail = supplier?.business_email || supplier?.email || '';
+  const rawPhone = supplier?.public_contact_number || supplier?.phone || '';
+  const [email, setEmail] = useState(rawEmail);
+  const [phone, setPhone] = useState(rawPhone);
+
+  // RFQ Content
+  const [subject, setSubject] = useState('');
+  const [messageBody, setMessageBody] = useState('');
+  const [customNotes, setCustomNotes] = useState('');
+  const [loadingRFQ, setLoadingRFQ] = useState(true);
+
+  // User Approval Checkbox (mandatory for outbound action)
+  const [userApproved, setUserApproved] = useState(false);
+
+  // Action status states
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionSuccess, setActionSuccess] = useState(null);
+  const [actionError, setActionError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  // Match Assessment
+  const matchStatus = supplier?.match_status || 'Needs Verification';
+  const matchReason = supplier?.match_reason || 'Preliminary assessment based on catalog search.';
+  const isMatchConfirmed = matchStatus === 'Exact Match' || matchStatus === 'Partial Match';
+  const isNeedsVerification = matchStatus === 'Needs Verification';
+  const isNotMatch = matchStatus === 'Not a Match';
+
+  // Identify missing specifications from requirement vs supplier
+  const getMissingSpecs = () => {
+    if (!requirement) return [];
+    const missing = [];
+    if (requirement.grade && (!supplier.specifications || !supplier.specifications.toLowerCase().includes(requirement.grade.toLowerCase()))) {
+      missing.push(`Material Grade / Standard: ${requirement.grade}`);
+    }
+    if (requirement.size && (!supplier.specifications || !supplier.specifications.toLowerCase().includes(requirement.size.toLowerCase()))) {
+      missing.push(`Dimensions / Size: ${requirement.size}`);
+    }
+    if (requirement.model && (!supplier.specifications || !supplier.specifications.toLowerCase().includes(requirement.model.toLowerCase()))) {
+      missing.push(`Exact Model Number: ${requirement.model}`);
+    }
+    if (requirement.delivery_requirement && !supplier.delivery_time) {
+      missing.push(`Lead Time confirmation (Requirement: ${requirement.delivery_requirement})`);
+    }
+    if (!supplier.listed_price && !supplier.confirmed_quoted_price) {
+      missing.push('Unit pricing and commercial terms (FOB/CIF)');
+    }
+    return missing;
+  };
+
+  const missingSpecs = getMissingSpecs();
+
+  // Load RFQ Message from backend
+  useEffect(() => {
+    generateRFQ();
+  }, [customNotes]);
+
+  const generateRFQ = async () => {
+    try {
+      setLoadingRFQ(true);
+      setActionError('');
+      const dealerId = supplier?.dealer_id || 'TEMP-DLR';
+      const reqId = requirement?.requirement_id || 'TEMP-REQ';
+
+      const res = await apiService.generateInquiry({
+        requirement_id: reqId,
+        dealer_id: dealerId,
+        supplier_name: supplier?.dealer_name || supplier?.supplier_name || '',
+        product_name: requirement?.product_name || supplier?.product_name || '',
+        category: requirement?.category || supplier?.category || '',
+        specifications: requirement?.specifications || supplier?.specifications || '',
+        quantity: requirement?.quantity,
+        target_price: requirement?.target_price,
+        currency: requirement?.currency || 'USD',
+        delivery_requirement: requirement?.delivery_requirement || '',
+        business_email: supplier?.business_email || supplier?.email || '',
+        public_contact_number: supplier?.public_contact_number || supplier?.phone || '',
+        product_url: supplier?.product_url || '',
+        sender_name: 'Industrial Procurement Team',
+        sender_company: 'Apex Manufacturing Corp.',
+        custom_notes: customNotes,
+      });
+
+      setSubject(res.subject || `REQUEST FOR QUOTATION: ${requirement?.product_name || supplier?.product_name || 'Industrial Part'}`);
+      setMessageBody(res.message || '');
+      if (!email && res.business_email) setEmail(res.business_email);
+      if (!phone && res.public_contact_number) setPhone(res.public_contact_number);
+    } catch (err) {
+      setActionError('Failed to generate customized RFQ message: ' + (err.message || ''));
+    } finally {
+      setLoadingRFQ(false);
+    }
+  };
+
+  // Copy RFQ letter
+  const handleCopy = () => {
+    navigator.clipboard.writeText(`Subject: ${subject}\n\n${messageBody}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  // 1. Send Email Action
+  const handleSendEmail = async () => {
+    if (!userApproved) {
+      setActionError('Please review specifications and check the authorization confirmation before sending.');
+      return;
+    }
+    if (!email || !email.trim()) {
+      setActionError('Please enter a valid supplier email address.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setActionError('');
+      setActionSuccess(null);
+
+      const payload = {
+        requirement_id: requirement?.requirement_id || 'REQ-N/A',
+        dealer_id: supplier?.dealer_id || 'DLR-SEARCH',
+        supplier_name: supplier?.dealer_name || supplier?.supplier_name || 'Supplier',
+        product_name: requirement?.product_name || supplier?.product_name || 'Part',
+        recipient_email: email.trim(),
+        subject: subject.trim(),
+        message_body: messageBody.trim(),
+        sender_name: 'Apex Procurement Team',
+        approved: true,
+      };
+
+      const res = await apiService.sendRfqEmail(payload);
+
+      if (res.success) {
+        setActionSuccess({
+          title: 'RFQ Email Sent Successfully!',
+          details: `Accepted by SMTP mail server. Provider Message ID: ${res.provider_message_id || 'N/A'}. Logged to Excel Contact_Log with status "Sent/Accepted".`,
+        });
+        if (onLogged) onLogged();
+      } else {
+        setActionError(res.error || 'Failed to dispatch email. Please check SMTP configuration.');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Error sending email.';
+      setActionError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 2. Send WhatsApp Action
+  const handleSendWhatsApp = async () => {
+    if (!userApproved) {
+      setActionError('Please review specifications and check the authorization confirmation before initiating WhatsApp contact.');
+      return;
+    }
+    if (!phone || !phone.trim()) {
+      setActionError('Please enter a valid supplier WhatsApp / business phone number with country code (e.g. +15551234567 or +919876543210).');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setActionError('');
+      setActionSuccess(null);
+
+      const payload = {
+        requirement_id: requirement?.requirement_id || 'REQ-N/A',
+        dealer_id: supplier?.dealer_id || 'DLR-SEARCH',
+        supplier_name: supplier?.dealer_name || supplier?.supplier_name || 'Supplier',
+        product_name: requirement?.product_name || supplier?.product_name || 'Part',
+        recipient_phone: phone.trim(),
+        message_body: messageBody.trim(),
+        approved: true,
+      };
+
+      const res = await apiService.sendRfqWhatsApp(payload);
+
+      if (res.success) {
+        if (res.is_draft_link) {
+          // Open prefilled WhatsApp Web / Client draft in a new browser tab
+          if (res.wa_link) {
+            window.open(res.wa_link, '_blank', 'noopener,noreferrer');
+          }
+          setActionSuccess({
+            title: 'WhatsApp Draft Opened for Review',
+            details: 'WhatsApp Cloud API is not configured. Opened a prefilled wa.me chat draft in WhatsApp for manual transmission. Logged as "Draft / Link Opened" in Excel (not recorded as delivered).',
+          });
+        } else {
+          setActionSuccess({
+            title: 'WhatsApp Message Dispatched via Cloud API!',
+            details: `Delivered via Meta WhatsApp Cloud API. Provider Message ID: ${res.provider_message_id}. Status: "Sent/Accepted".`,
+          });
+        }
+        if (onLogged) onLogged();
+      } else {
+        setActionError(res.error || 'Failed to initiate WhatsApp contact.');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Error processing WhatsApp request.';
+      setActionError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 3. Portal / Manual Log Action
+  const handleLogPortalOutreach = async () => {
+    if (!userApproved) {
+      setActionError('Please review specifications and check the authorization confirmation before recording.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setActionError('');
+
+      const contactPayload = {
+        dealer_id: supplier?.dealer_id || 'DLR-SEARCH',
+        requirement_id: requirement?.requirement_id || 'REQ-N/A',
+        supplier_name: supplier?.dealer_name || supplier?.supplier_name || 'Supplier',
+        product_name: requirement?.product_name || supplier?.product_name || 'Part',
+        contact_method: 'Portal Inquiry',
+        recipient_contact: supplier?.product_url || 'Direct Portal',
+        subject: subject,
+        inquiry_message: messageBody,
+        contact_date: new Date().toISOString().split('T')[0],
+        response_status: 'Pending',
+        communication_status: 'Pending',
+        approval_timestamp: new Date().toISOString(),
+        notes: `Outreach conducted via supplier portal (${supplier?.source_portal || 'Web'}). Direct RFQ copy recorded.`,
+      };
+
+      await apiService.createContact(contactPayload);
+      setActionSuccess({
+        title: 'Portal Outreach Recorded in Excel',
+        details: 'Outreach entry created in Contact_Log sheet. Follow-up scheduled.',
+      });
+      if (onLogged) onLogged();
+    } catch (err) {
+      setActionError('Failed to record in Excel: ' + (err.message || ''));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150 my-6">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-900 text-white">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-400">
+              <Mail className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  Contact Supplier & RFQ Outreach
+                </h3>
+                <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-sky-300 border border-slate-700">
+                  {supplier?.dealer_id || 'NEW SUPPLIER'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                To: <strong className="text-white">{supplier?.dealer_name || 'Supplier Representative'}</strong> | Re: {requirement?.product_name} ({requirement?.requirement_id})
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-white rounded-lg p-1.5 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-xs">
+          {/* Match Status & Specification Verification Banner */}
+          {isNotMatch ? (
+            <div className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 space-y-1">
+              <div className="flex items-center gap-2 font-bold text-rose-900">
+                <ShieldAlert className="w-4 h-4 text-rose-600" />
+                <span>Not a Match — Outbound RFQ Transmission Restricted</span>
+              </div>
+              <p className="text-[11px] text-rose-700">
+                {matchReason || 'Technical specifications do not match product requirements. Per manufacturing procurement policy, RFQs cannot be sent to non-matching listings.'}
+              </p>
+            </div>
+          ) : isNeedsVerification ? (
+            <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 space-y-2">
+              <div className="flex items-center gap-2 font-bold text-amber-900">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Needs Verification — Missing Specifications Require Supplier Confirmation</span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                {matchReason}
+              </p>
+              {missingSpecs.length > 0 && (
+                <div className="pt-1 border-t border-amber-200/80">
+                  <span className="font-semibold text-[10px] uppercase tracking-wider text-amber-900">
+                    Unverified Items to Confirm in RFQ:
+                  </span>
+                  <ul className="list-disc list-inside mt-1 space-y-0.5 text-[11px] text-amber-800 font-medium">
+                    {missingSpecs.map((spec, i) => (
+                      <li key={i}>{spec}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-1">
+              <div className="flex items-center gap-2 font-bold text-emerald-900">
+                <CheckCircle className="w-4 h-4 text-emerald-600" />
+                <span>Confirmed Match — Eligible for Formal RFQ Outreach</span>
+              </div>
+              <p className="text-[11px] text-emerald-800">
+                {matchReason || 'Product conforms to technical specifications.'}
+              </p>
+            </div>
+          )}
+
+          {/* Supplier Contact Info & Portal Link Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-slate-700">
+            {/* Email Address */}
+            <div className="space-y-1">
+              <label className="flex items-center gap-1 font-semibold text-slate-800 text-[11px]">
+                <Mail className="w-3.5 h-3.5 text-sky-600" />
+                <span>Supplier Email</span>
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter supplier email (or 'Not available')"
+                className="w-full text-xs rounded border border-slate-300 px-2.5 py-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+              {!email ? (
+                <span className="text-[10px] text-amber-600">Not available on listing</span>
+              ) : (
+                <span className="text-[10px] text-emerald-600">Ready for SMTP dispatch</span>
+              )}
+            </div>
+
+            {/* Phone / WhatsApp */}
+            <div className="space-y-1">
+              <label className="flex items-center gap-1 font-semibold text-slate-800 text-[11px]">
+                <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                <span>WhatsApp / Phone (E.164)</span>
+              </label>
+              <input
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="e.g. +15551234567 or +919876543210"
+                className="w-full text-xs rounded border border-slate-300 px-2.5 py-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+              {!phone ? (
+                <span className="text-[10px] text-amber-600">Not available on listing</span>
+              ) : (
+                <span className="text-[10px] text-emerald-600">Ready for WhatsApp</span>
+              )}
+            </div>
+
+            {/* Listing URL / Portal */}
+            <div className="space-y-1">
+              <label className="flex items-center gap-1 font-semibold text-slate-800 text-[11px]">
+                <Globe className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Catalog / Portal URL</span>
+              </label>
+              <div className="pt-1.5 truncate">
+                {supplier?.product_url ? (
+                  <a
+                    href={supplier.product_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-sky-600 hover:text-sky-800 font-semibold truncate"
+                  >
+                    <span className="truncate max-w-[200px]">{supplier.product_url}</span>
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                ) : (
+                  <span className="text-slate-400">Direct Portal / Directory listing</span>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-500 block">
+                Portal: {supplier?.source_portal || 'Live Web Directory'}
+              </span>
+            </div>
+          </div>
+
+          {/* Contact Method Channel Tabs */}
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+            <span className="font-semibold text-slate-700 text-xs mr-2">Contact Method:</span>
+            <button
+              type="button"
+              onClick={() => setActiveChannel('email')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeChannel === 'email'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span>Email (SMTP)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveChannel('whatsapp')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeChannel === 'whatsapp'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>WhatsApp</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveChannel('portal')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeChannel === 'portal'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Supplier Portal</span>
+            </button>
+          </div>
+
+          {/* Feedback alerts */}
+          {actionError && (
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <span className="font-semibold">Transmission / Configuration Notice:</span>
+                <p className="text-[11px] leading-relaxed">{actionError}</p>
+              </div>
+            </div>
+          )}
+
+          {actionSuccess && (
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-start gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <span className="font-semibold">{actionSuccess.title}</span>
+                <p className="text-[11px] leading-relaxed">{actionSuccess.details}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Custom Engineering Notes input */}
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Custom Engineering Notes / Commercial Instructions (Optional)
+            </label>
+            <input
+              type="text"
+              value={customNotes}
+              onChange={(e) => setCustomNotes(e.target.value)}
+              placeholder="e.g. Please confirm if FOB Chicago terms apply. Include Material Test Report (MTR)."
+              className="w-full text-xs rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-500"
+            />
+          </div>
+
+          {/* Subject Line (Email & Portal) */}
+          {activeChannel !== 'whatsapp' && (
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Formal RFQ Subject Line
+              </label>
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="w-full text-xs rounded-lg border border-slate-300 px-3 py-2 font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+            </div>
+          )}
+
+          {/* Message Body */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-slate-700">
+                {activeChannel === 'whatsapp' ? 'WhatsApp RFQ Message' : 'Formal RFQ Message Body'}
+              </label>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copied ? 'Copied to Clipboard!' : 'Copy Letter'}</span>
+              </button>
+            </div>
+            <textarea
+              rows={activeChannel === 'whatsapp' ? 8 : 11}
+              value={messageBody}
+              onChange={(e) => setMessageBody(e.target.value)}
+              className="w-full text-xs font-mono rounded-lg border border-slate-300 p-3 text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-sky-500"
+            />
+          </div>
+
+          {/* Compliance & Authorization Checkbox */}
+          <div className="p-3.5 rounded-lg bg-sky-50/60 border border-sky-200/60 text-slate-700 space-y-2">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-semibold text-slate-800">Procurement Governance & Authorization</p>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Bulk automated unsolicited messaging is strictly prohibited. Outbound contact must be explicitly approved by procurement staff after reviewing technical specifications.
+                </p>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 pt-1 text-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={userApproved}
+                onChange={(e) => setUserApproved(e.target.checked)}
+                className="w-4 h-4 text-sky-600 rounded border-slate-300 focus:ring-sky-500"
+              />
+              <span className="font-semibold text-xs text-slate-900">
+                I have reviewed the technical specifications and approve initiating contact with this supplier.
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* Action Footer */}
+        <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between bg-slate-50">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition-colors shadow-xs"
+          >
+            {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+            <span>{copied ? 'Copied!' : 'Copy to Clipboard'}</span>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-200 transition-colors"
+            >
+              Close
+            </button>
+
+            {/* Dynamic Action Button based on Active Channel */}
+            {activeChannel === 'email' && (
+              <button
+                type="button"
+                disabled={!userApproved || isSubmitting || isNotMatch || !email}
+                onClick={handleSendEmail}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send className="w-4 h-4" />
+                <span>{isSubmitting ? 'Sending Email via SMTP...' : 'Send RFQ Email'}</span>
+              </button>
+            )}
+
+            {activeChannel === 'whatsapp' && (
+              <button
+                type="button"
+                disabled={!userApproved || isSubmitting || isNotMatch || !phone}
+                onClick={handleSendWhatsApp}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>{isSubmitting ? 'Processing WhatsApp...' : 'Open WhatsApp / Send'}</span>
+              </button>
+            )}
+
+            {activeChannel === 'portal' && (
+              <button
+                type="button"
+                disabled={!userApproved || isSubmitting || isNotMatch}
+                onClick={handleLogPortalOutreach}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Globe className="w-4 h-4" />
+                <span>{isSubmitting ? 'Recording in Excel...' : 'Record Portal Outreach in Excel'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
